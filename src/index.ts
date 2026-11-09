@@ -85,6 +85,29 @@ function createMcpServer() {
         }
     )
 
+    server.registerTool(
+        "create_task",
+        {
+            description: "Create a new task",
+            inputSchema: zod.object({
+                id: zod.int(),
+                title: zod.string()
+            })
+        },
+        async ({ ...payload }) => {
+            tasks.push({ id: payload.id, title: payload.title, status: "todo" })
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify(tasks)
+                    }
+                ]
+            }
+        }
+    )
+
     return server;
 }
 

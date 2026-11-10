@@ -1,75 +1,82 @@
-import OpenAI from "openai";
-import { llm, MODEL } from "./llm.js";
+import { ai, MODEL } from "./llm.js";
 
 export async function askAgent(
     mcpClient: any,
     userMessage: string
 ) {
-    // 1. Discover MCP tools
-    const { tools: mcpTools } = await mcpClient.listTools()
+    // 1. Discover MCP tools and convert them to Gemini function declarations format
+    const { tools: mcpTools } = await mcpClient.listTools();
 
-    // 2. Convert MCP tools to LLM tools
-    const llmTools: OpenAI.Chat.Completions.ChatCompletionTool[] =
-        mcpTools.map((tool: any) => ({
-            type: "function",
-            function: {
-                name: tool.name,
-                description: tool.description ?? "",
-                parameters: tool.inputSchema,
-            },
-        }));
+    // Gemini expects an array of function declarations under a `functionDeclarations` object
+    const geminiTools = [{
+        functionDeclarations: mcpTools.map((tool: any) => ({
+            name: tool.name,
+            description: tool.description ?? "",
+            parameters: tool.inputSchema,
+        }))
+    }];
 
-    // 3. Initialize conversation
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        {
-            role: "system",
-            content: "You are a helpful Task Manager assistant. Use available tools when needed.",
-        },
-        {
-            role: "user",
-            content: userMessage
+    // 2. Initialize the chat session with system instructions and user message
+    const chat = ai.chats.create({
+        model: MODEL,
+        config: {
+            systemInstruction: "You are a helpful Task Manager assistant. Use available tools when needed.",
+            tools: geminiTools,
         }
-    ]
+    });
+
+    // 3. Send the user message to start the agent loop
+    let response = await chat.sendMessage({ message: userMessage });
 
     // 4. Agent Loop
-    const MAX_ITERATIONS = 5
+    const MAX_ITERATIONS = 5;
 
     for (let i = 0; i <= MAX_ITERATIONS; i++) {
-        const response = await llm.chat.completions.create({
-            model: MODEL,
-            messages,
-            tools: llmTools,
-        });
-        const assistantMessage: any = response.choices[0]?.message;
+        // Check if Gemini requested any function calls
+        const functionCalls = response.functionCalls;
 
-        // Save the assistant response
-        messages.push(assistantMessage);
-
-        // 5. No tool call: return final answer
-        if (!assistantMessage.tool_calls?.length)
-            return assistantMessage.content ?? ""
-
-        // 6. Execute requested tools
-        for (const toolCall of assistantMessage.tool_calls) {
-            const toolName = toolCall.function.name;
-            const toolArguments = JSON.parse(toolCall.function.arguments)
-
-            console.log(`Executing MCP tool: ${toolName}`);
-
-            const result = await mcpClient.callTool({
-                name: toolName,
-                arguments: toolArguments
-            })
-
-            // 7. Send tool result back to LLM
-            messages.push({
-                role: "tool",
-                tool_call_id: toolCall.id,
-                content: JSON.stringify(result.content)
-            })
+        // If no function calls are requested, return the final text response
+        if (!functionCalls || functionCalls.length === 0) {
+            return response.text ?? "";
         }
 
-        throw new Error("Agent exceeded maximum iterations");
+        // 5. Execute requested tools and send their results back
+        // Gemini's SDK handles sending multiple tool responses in a single turn via functionResponses
+        const functionResponses = [];
+
+        for (const call of functionCalls) {
+            console.log(`Executing MCP tool: ${call.name}`);
+
+            const result = await mcpClient.callTool({
+                name: call.name,
+                arguments: call.args
+            });
+
+            // Extract the text payload from MCP's content array
+            const textContent = result.content?.[0]?.text;
+            let toolOutput;
+
+            try {
+                // Parse if it's a JSON string (which your get_tasks tool returns via JSON.stringify)
+                toolOutput = JSON.parse(textContent);
+            } catch {
+                toolOutput = textContent;
+            }
+
+            // Construct the proper Gemini function response structure
+            functionResponses.push({
+                functionResponse: {
+                    name: call.name,
+                    response: { result: toolOutput }
+                }
+            });
+        }
+
+        // 6. Send the tool execution outputs back to the chat session
+        response = await chat.sendMessage({
+            message: functionResponses
+        });
     }
 
+    throw new Error("Agent exceeded maximum iterations");
 }

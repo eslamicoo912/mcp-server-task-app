@@ -1,9 +1,9 @@
 import "dotenv/config";
-import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 
-export const llm = new OpenAI({
-    baseURL: "https://ollama.com/v1",
-    apiKey: process.env.OLLAMA_API_KEY
+// It automatically picks up process.env.GEMINI_API_KEY
+export const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY!
 });
 
-export const MODEL = process.env.OLLAMA_MODEL!;
+export const MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";

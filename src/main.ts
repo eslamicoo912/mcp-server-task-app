@@ -17,7 +17,7 @@ async function main() {
     try {
         const answer = await askAgent(
             mcpClient,
-            "Show me all completed tasks."
+            "Show me completed tasks."
         );
 
         console.log("\nAI Response:\n", answer);

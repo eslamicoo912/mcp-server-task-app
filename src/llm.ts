@@ -1,0 +1,9 @@
+import "dotenv/config";
+import OpenAI from "openai";
+
+export const llm = new OpenAI({
+    baseURL: "",
+    apiKey: process.env.OLLAMA_API_KEY
+});
+
+export const MODEL = process.env.OLLAMA_MODEL!;
